@@ -19,3 +19,7 @@ def test_add_numbers():
 def test_dummy():
     """Przykładowy test dummy"""
     assert True
+
+def test_failing_test():
+    """Test który zawsze failuje"""
+    assert False, "Celowy fail do testowania powiadomień"
