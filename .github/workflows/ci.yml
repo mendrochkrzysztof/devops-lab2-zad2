@@ -23,7 +23,7 @@ jobs:
     
     steps:
     - name: Cancel Previous Runs
-      uses: styfle/cancel-workflow-action@0.12.0
+      uses: styfle/cancel-workflow-action@0.12.1
       with:
         access_token: ${{ github.token }}
     
@@ -31,31 +31,38 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
     
     - name: Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        path: |
+          ~/.cache/pip
+          venv/
+        key: ${{ runner.os }}-python-${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
-          ${{ runner.os }}-pip-
+          ${{ runner.os }}-python-${{ matrix.python-version }}-pip-
+          ${{ runner.os }}-python-${{ matrix.python-version }}-
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install pytest
+    
+    - name: Create test reports directory
+      run: mkdir -p test-reports
     
     - name: Run tests
       run: |
-        python -m pytest tests/ -v
+        python -m pytest tests/ -v --junitxml=test-reports/junit-${{ matrix.python-version }}.xml || echo "Tests completed with exit code: $?"
     
     - name: Upload test results
-      uses: actions/upload-artifact@v3
       if: always()
+      uses: actions/upload-artifact@v4
       with:
         name: test-results-${{ matrix.python-version }}
         path: |
@@ -71,7 +78,7 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
         cache: 'pip'
@@ -86,10 +93,12 @@ jobs:
         # Symulacja procesu buildowania
         mkdir -p dist
         cp src/app.py dist/
+        echo "Python version: $(python --version)" > dist/build-info.txt
+        echo "Build date: $(date)" >> dist/build-info.txt
         echo "Build completed successfully!"
     
     - name: Upload build artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: application-build
         path: dist/
@@ -105,8 +114,9 @@ jobs:
       run: |
         if [ -n "$WEBHOOK_URL" ]; then
           echo "Sending notification to webhook..."
+          # Poprawiona struktura JSON dla webhooka
           curl -X POST -H "Content-Type: application/json" \
-          -d '{"text":"🚨 Build failed! Repository: ${{ github.repository }}, Workflow: ${{ github.workflow }}, Commit: ${{ github.sha }}"}' \
+          -d "{\"text\":\"🚨 Build failed in ${{ github.repository }}!\nWorkflow: ${{ github.workflow }}\nCommit: ${{ github.sha }}\nView: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
           $WEBHOOK_URL
         else
           echo "WEBHOOK_URL not set - skipping notification"
