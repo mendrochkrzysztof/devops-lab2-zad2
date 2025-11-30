@@ -58,7 +58,7 @@ jobs:
     
     - name: Run tests
       run: |
-        python -m pytest tests/ -v --junitxml=test-reports/junit-${{ matrix.python-version }}.xml || echo "Tests completed with exit code: $?"
+        python -m pytest tests/ -v --junitxml=test-reports/junit-${{ matrix.python-version }}.xml
     
     - name: Upload test results
       if: always()
@@ -90,7 +90,6 @@ jobs:
     - name: Build application
       run: |
         echo "Building application..."
-        # Symulacja procesu buildowania
         mkdir -p dist
         cp src/app.py dist/
         echo "Python version: $(python --version)" > dist/build-info.txt
@@ -106,18 +105,29 @@ jobs:
 
   notify:
     runs-on: ubuntu-22.04
-    needs: [test, build]
-    if: failure()
+    if: failure() && (needs.test.result == 'failure' || needs.build.result == 'failure')
     
     steps:
+    - name: Determine failure reason
+      id: failure-reason
+      run: |
+        if [ "${{ needs.test.result }}" == "failure" ]; then
+          echo "FAILURE_REASON=Tests failed" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.build.result }}" == "failure" ]; then
+          echo "FAILURE_REASON=Build failed" >> $GITHUB_OUTPUT
+        else
+          echo "FAILURE_REASON=Unknown failure" >> $GITHUB_OUTPUT
+        fi
+    
     - name: Send notification on failure
       run: |
         if [ -n "$WEBHOOK_URL" ]; then
           echo "Sending notification to webhook..."
-          # Poprawiona struktura JSON dla webhooka
           curl -X POST -H "Content-Type: application/json" \
-          -d "{\"text\":\"🚨 Build failed in ${{ github.repository }}!\nWorkflow: ${{ github.workflow }}\nCommit: ${{ github.sha }}\nView: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-          $WEBHOOK_URL
+          -d "{
+            \"text\":\"🚨 **Build Failed!** \n\n📁 Repository: ${{ github.repository }}\n🔧 Workflow: ${{ github.workflow }}\n📝 Commit: \`${{ github.sha }}\`\n❌ Reason: ${{ steps.failure-reason.outputs.FAILURE_REASON }}\n🔗 View Logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+          }" \
+          $WEBHOOK_URL || echo "Webhook call failed, but continuing..."
         else
           echo "WEBHOOK_URL not set - skipping notification"
         fi
