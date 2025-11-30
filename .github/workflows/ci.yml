@@ -71,9 +71,9 @@ jobs:
 
   build:
     runs-on: ubuntu-22.04
-    # Uruchamiaj build nawet jeśli testy failują, ale tylko jeśli test job się wykonał (nie był cancelled)
-    if: always() && (needs.test.result == 'success' || needs.test.result == 'failure')
-    needs: [test]
+    # Uruchamiaj build tylko jeśli testy przeszły
+    needs: test
+    if: needs.test.result == 'success'
     
     steps:
     - name: Checkout code
@@ -107,38 +107,29 @@ jobs:
 
   notify:
     runs-on: ubuntu-22.04
-    # Uruchamiaj zawsze i sprawdzaj wyniki test i build
-    if: always()
+    # Uruchamiaj zawsze, ale tylko jeśli test lub build zakończyły się niepowodzeniem
+    if: always() && (needs.test.result == 'failure' || needs.build.result == 'failure')
     needs: [test, build]
     
     steps:
-    - name: Check job statuses
-      id: check-status
+    - name: Determine failure reason
+      id: failure-reason
       run: |
-        echo "Test result: ${{ needs.test.result }}"
-        echo "Build result: ${{ needs.build.result }}"
-        
-        # Sprawdź czy którykolwiek job zakończył się niepowodzeniem
-        if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.build.result }}" == "failure" ]; then
-          echo "has_failure=true" >> $GITHUB_OUTPUT
-          if [ "${{ needs.test.result }}" == "failure" ]; then
-            echo "failure_reason=Tests failed" >> $GITHUB_OUTPUT
-          elif [ "${{ needs.build.result }}" == "failure" ]; then
-            echo "failure_reason=Build failed" >> $GITHUB_OUTPUT
-          fi
+        if [ "${{ needs.test.result }}" == "failure" ]; then
+          echo "FAILURE_REASON=Tests failed" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.build.result }}" == "failure" ]; then
+          echo "FAILURE_REASON=Build failed" >> $GITHUB_OUTPUT
         else
-          echo "has_failure=false" >> $GITHUB_OUTPUT
+          echo "FAILURE_REASON=Unknown failure" >> $GITHUB_OUTPUT
         fi
     
     - name: Send notification on failure
-      if: steps.check-status.outputs.has_failure == 'true'
       run: |
         if [ -n "$WEBHOOK_URL" ]; then
           echo "Sending notification to webhook..."
-          REASON="${{ steps.check-status.outputs.failure_reason }}"
           curl -X POST -H "Content-Type: application/json" \
           -d "{
-            \"text\":\"🚨 **Build Failed!** \n\n📁 Repository: ${{ github.repository }}\n🔧 Workflow: ${{ github.workflow }}\n📝 Commit: \`${{ github.sha }}\`\n❌ Reason: $REASON\n🔗 View Logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+            \"text\":\"🚨 **Build Failed!** \n\n📁 Repository: ${{ github.repository }}\n🔧 Workflow: ${{ github.workflow }}\n📝 Commit: \`${{ github.sha }}\`\n❌ Reason: ${{ steps.failure-reason.outputs.FAILURE_REASON }}\n🔗 View Logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
           }" \
           $WEBHOOK_URL || echo "Webhook call failed, but continuing..."
         else
